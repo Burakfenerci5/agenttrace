@@ -1,0 +1,35 @@
+{
+  "name": "agenttrace",
+  "version": "0.1.0",
+  "description": "See what your AI coding agents actually accomplished — every Claude Code session mapped to the files it changed, the commits it produced, and whether they stuck. Local-first, zero backend.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "ai-agents",
+    "observability",
+    "developer-tools",
+    "cli",
+    "local-first"
+  ],
+  "bin": {
+    "agenttrace": "./src/cli.ts"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": { "node": ">=23.6" },
+  "scripts": {
+    "dev": "node src/cli.ts",
+    "start": "node src/cli.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
