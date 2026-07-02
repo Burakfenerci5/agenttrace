@@ -20,7 +20,7 @@ npx agenttrace            # list your sessions, newest first
 Or clone and run locally:
 
 ```bash
-git clone https://github.com/<you>/agenttrace && cd agenttrace
+git clone https://github.com/Burakfenerci5/agenttrace && cd agenttrace
 node src/cli.ts           # same as `npx agenttrace`
 ```
 
@@ -54,7 +54,7 @@ Everything runs against `~/.claude/projects` on your machine. Nothing is uploade
 ## Prove it, don't just observe it
 
 AgentTrace shows you what your agents *reportedly* did (heuristics over local logs). Its
-sibling **[ActionProof](https://github.com/<you>/actionproof)** lets you *prove* it:
+sibling **[ActionProof](https://github.com/Burakfenerci5/actionproof)** lets you *prove* it:
 Ed25519-signed, tamper-evident receipts for any action or session, verifiable offline.
 If ActionProof is installed alongside AgentTrace, the dashboard's **Sign** button mints a
 real receipt and shows a `✓ verified` badge — the free-to-provable bridge, built in.

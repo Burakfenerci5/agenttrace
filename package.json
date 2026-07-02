@@ -12,6 +12,11 @@
     "cli",
     "local-first"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Burakfenerci5/agenttrace.git"
+  },
+  "homepage": "https://github.com/Burakfenerci5/agenttrace#readme",
   "bin": {
     "agenttrace": "./src/cli.ts"
   },
