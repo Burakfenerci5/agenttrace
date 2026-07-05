@@ -3,3 +3,9 @@ node_modules/
 .DS_Store
 dist/
 # Local runtime state (receipts, recommendation status) lives in ~/.agenttrace
+
+# Desktop app build artifacts (Electron)
+desktop/core.cjs
+desktop/release/
+desktop/assets/icon.iconset/
+desktop/assets/icon_*.png

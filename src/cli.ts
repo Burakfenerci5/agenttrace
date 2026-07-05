@@ -10,10 +10,8 @@
  *
  * Everything runs locally against ~/.claude/projects — no backend, no network.
  */
-import { findTranscripts } from "./discover.ts";
-import { parseTranscript } from "./parse.ts";
-import { correlate } from "./correlate.ts";
 import { serve } from "./dashboard.ts";
+import { loadSessions } from "./core.ts";
 
 import type { Session } from "./types.ts";
 import { outcomeDisplay } from "./types.ts";
@@ -38,15 +36,6 @@ function outcomeBadge(label: Session["outcome"]["label"]): string {
     tone === "good" ? green : tone === "bad" ? red : tone === "warn" ? yellow : cyan;
   const glyph = tone === "good" ? "●" : tone === "bad" ? "●" : tone === "warn" ? "●" : "○";
   return paintByTone(`${glyph} ${text}`);
-}
-
-/** Load, parse, and correlate every transcript on disk. */
-function loadSessions(): Session[] {
-  return findTranscripts().map((path) => {
-    const session = parseTranscript(path);
-    session.outcome = correlate(session);
-    return session;
-  });
 }
 
 /** Shorten a model id like "claude-opus-4-8-20260101" to "opus-4-8". */
