@@ -83,13 +83,30 @@ Two electron-builder hooks make this automatic:
   **.dmg** container (electron-builder builds the DMG after signing, so the
   container needs its own ticket or `spctl -t install` rejects it on download).
 
-Both hooks **no-op unless** these three env vars are set, so local `--dir` builds
-still work without credentials:
+Both hooks **no-op unless** credentials are available, so local `--dir` builds
+still work without them.
+
+**Preferred — keychain profile (the app-specific password never touches your
+shell or env, so it can't leak into shell history):** create it once, then the
+build reads it by name.
 ```bash
-export APPLE_ID=alpfenercioglu@gmail.com
-export APPLE_APP_SPECIFIC_PASSWORD=xxxx-xxxx-xxxx-xxxx   # appleid.apple.com → App-Specific Passwords (shown once)
-export APPLE_TEAM_ID=DLGZKZV4KN
+# one-time: stores the app-specific password in the macOS login keychain
+xcrun notarytool store-credentials agenttrace-notary \
+  --apple-id alpfenercioglu@gmail.com --team-id DLGZKZV4KN
+#   (paste the app-specific password when prompted)
+
+export APPLE_KEYCHAIN_PROFILE=agenttrace-notary   # name only — no secret
 cd desktop && npm run dist        # build + sign + notarize app AND dmgs + staple
+```
+
+**Fallback — explicit env vars** (avoid on shared machines). Put them in
+`desktop/.env` (gitignored; see `desktop/.env.example`) rather than typing
+`export VAR=<value>` inline, which lands in shell history:
+```bash
+# desktop/.env
+APPLE_ID=alpfenercioglu@gmail.com
+APPLE_APP_SPECIFIC_PASSWORD=xxxx-xxxx-xxxx-xxxx   # appleid.apple.com → App-Specific Passwords (shown once)
+APPLE_TEAM_ID=DLGZKZV4KN
 ```
 
 Verify a built artifact before shipping:
@@ -101,7 +118,7 @@ xcrun stapler validate release/AgentTrace-0.1.0-arm64.dmg
 
 > Notarization can sit "In Progress" on Apple's side for 20–40 min; the build
 > parks on `notarytool --wait` and resumes automatically. Check status with:
-> `xcrun notarytool history --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID"`
+> `xcrun notarytool history --keychain-profile agenttrace-notary`
 >
 > **Rotate the app-specific password** if it was ever exposed — revoke it at
 > appleid.apple.com → Sign-In & Security → App-Specific Passwords.

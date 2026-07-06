@@ -1,0 +1,4 @@
+# Secrets — never commit. Use .env.example as the template.
+.env
+.env.local
+.env.*.local
