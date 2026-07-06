@@ -9,22 +9,35 @@
 - [x] Public GitHub repo: https://github.com/Burakfenerci5/agenttrace
 - [x] Topics added, `v0.1.0` tag + GitHub Release published
 
-## Pending — npm publish
-Blocked on npm auth: `npm whoami` currently returns **401** (the token in `~/.npmrc`
-is expired/invalid). To publish:
+## npm publish (2026-07-05 — ready, run from repo ROOT)
+Auth is fixed (`npm login` done; `npm whoami` → burakfenerci5). To publish:
 
 ```bash
-npm login                 # re-authenticate (fixes the 401)
-npm whoami                # confirm you're logged in
+cd /Users/bfenercioglu/Documents/agenttrace   # ROOT, not desktop/ !!
 npm publish --access public
 ```
 
+> ⚠️ **Publish from the repo root, never from `desktop/`.** `desktop/package.json`
+> is the Electron app — it's `private: true` on purpose (a 400 MB tarball with the
+> DMGs) and will (correctly) refuse to publish.
+
+**Why the package ships built JS, not `.ts`:** locally `node src/cli.ts` works
+because Node strips TypeScript types for files you run directly — but Node
+REFUSES to strip types under `node_modules`, so a published `.ts` bin crashes
+instantly on `npx agenttrace`. So `prepublishOnly` runs typecheck + tests +
+`npm run build` (esbuild bundles `src/cli.ts` → `dist/cli.js`), and `bin` +
+`files` point at `dist/`. This also drops the npm install requirement to
+**Node ≥ 20** (only the from-source path needs 23.6). Verified end-to-end by
+installing the packed tarball into a temp prefix and running `agenttrace --help`
+and `agenttrace --json`.
+
 Notes:
 - The name `agenttrace` is **available** on npm (verified 2026-07-01).
-- `prepublishOnly` will re-run typecheck + tests before the publish goes out.
-- **`min-release-age=7`** in your `~/.npmrc` is your supply-chain protection — after a
+- **`min-release-age=7`** in `~/.npmrc` is supply-chain protection — after a
   successful publish, `npx agenttrace` won't install on *your own* machine for 7 days.
   To test immediately after publishing: `npm_config_min_release_age=0 npx agenttrace`.
+- The dry-run prints `bin ... was invalid and removed` — that's a cosmetic npm
+  lint warning; the real tarball keeps `bin: {"agenttrace":"./dist/cli.js"}` (verified).
 
 ## Security hardening (2026-07-05)
 Both surfaces were hardened before deploy. All 37 tests pass; the guards were

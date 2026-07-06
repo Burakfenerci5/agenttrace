@@ -18,23 +18,25 @@
   },
   "homepage": "https://github.com/Burakfenerci5/agenttrace#readme",
   "bin": {
-    "agenttrace": "./src/cli.ts"
+    "agenttrace": "./dist/cli.js"
   },
   "files": [
-    "src/",
+    "dist/",
     "README.md",
     "LICENSE"
   ],
-  "engines": { "node": ">=23.6" },
+  "engines": { "node": ">=20" },
   "scripts": {
     "dev": "node src/cli.ts",
     "start": "node src/cli.ts",
+    "build": "node scripts/build.mjs",
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run typecheck && npm test"
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "esbuild": "^0.24.0",
     "typescript": "^5.7.0"
   }
 }

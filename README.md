@@ -13,13 +13,17 @@ better. All in your terminal or a local dashboard, without sending anything anyw
 
 ## Install
 
-Requires **Node ≥ 23.6** (AgentTrace runs TypeScript directly — no build step).
+**Mac app** — [download the latest `.dmg`](https://github.com/Burakfenerci5/agenttrace/releases/latest)
+(signed & notarized; Apple Silicon and Intel).
+
+**Command line** — requires **Node ≥ 20**:
 
 ```bash
 npx agenttrace            # list your sessions, newest first
 ```
 
-Or clone and run locally:
+Or clone and run from source (this path uses Node's TypeScript type-stripping,
+so it needs **Node ≥ 23.6** — no build step):
 
 ```bash
 git clone https://github.com/Burakfenerci5/agenttrace && cd agenttrace
