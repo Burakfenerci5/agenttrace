@@ -19,15 +19,16 @@ better. All in your terminal or a local dashboard, without sending anything anyw
 **Command line** — requires **Node ≥ 20**:
 
 ```bash
-npx agenttrace            # list your sessions, newest first
+npx agenttrace-cli        # list your sessions, newest first
 ```
 
+The installed command is `agenttrace` (the npm package is `agenttrace-cli`).
 Or clone and run from source (this path uses Node's TypeScript type-stripping,
 so it needs **Node ≥ 23.6** — no build step):
 
 ```bash
 git clone https://github.com/Burakfenerci5/agenttrace && cd agenttrace
-node src/cli.ts           # same as `npx agenttrace`
+node src/cli.ts           # same as `npx agenttrace-cli`
 ```
 
 ## Quick start

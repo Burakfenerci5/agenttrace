@@ -17,6 +17,11 @@ cd /Users/bfenercioglu/Documents/agenttrace   # ROOT, not desktop/ !!
 npm publish --access public
 ```
 
+> **Package name is `agenttrace-cli`** (not bare `agenttrace` — npm blocks that
+> as too similar to the existing `agent-trace`). The installed **command is still
+> `agenttrace`** (the `bin` name is independent of the package name). Users run
+> `npx agenttrace-cli`.
+
 > ⚠️ **Publish from the repo root, never from `desktop/`.** `desktop/package.json`
 > is the Electron app — it's `private: true` on purpose (a 400 MB tarball with the
 > DMGs) and will (correctly) refuse to publish.
@@ -34,8 +39,8 @@ and `agenttrace --json`.
 Notes:
 - The name `agenttrace` is **available** on npm (verified 2026-07-01).
 - **`min-release-age=7`** in `~/.npmrc` is supply-chain protection — after a
-  successful publish, `npx agenttrace` won't install on *your own* machine for 7 days.
-  To test immediately after publishing: `npm_config_min_release_age=0 npx agenttrace`.
+  successful publish, `npx agenttrace-cli` won't install on *your own* machine for 7 days.
+  To test immediately after publishing: `npm_config_min_release_age=0 npx agenttrace-cli`.
 - The dry-run prints `bin ... was invalid and removed` — that's a cosmetic npm
   lint warning; the real tarball keeps `bin: {"agenttrace":"./dist/cli.js"}` (verified).
 

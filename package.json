@@ -1,5 +1,5 @@
 {
-  "name": "agenttrace",
+  "name": "agenttrace-cli",
   "version": "0.1.0",
   "description": "See what your AI coding agents actually accomplished — every Claude Code session mapped to the files it changed, the commits it produced, and whether they stuck. Local-first, zero backend.",
   "type": "module",
