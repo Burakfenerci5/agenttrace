@@ -15,7 +15,15 @@ import { loadSessions } from "./core.ts";
 
 import type { Session } from "./types.ts";
 import { outcomeDisplay } from "./types.ts";
-import { toAgentMarkdown, toAgentJson } from "./analysis.ts";
+
+/** Recommendation category → plain feature label (matches the dashboard). */
+const REC_CATEGORY: Record<string, string> = {
+  agenttrace: "Workflow",
+  tokenkeeper: "Cost",
+  sessionsentry: "Security",
+  actionproof: "Proof",
+};
+import { toAgentMarkdown, toAgentJson, provenRoi } from "./analysis.ts";
 
 // --- tiny ANSI helpers (no deps; disabled when not a TTY or NO_COLOR set) ---
 const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
@@ -169,6 +177,20 @@ function listCommand(asJson: boolean): void {
   console.log(
     dim(`  total est. spend across all sessions: `) + bold(fmtCost(grandCost)),
   );
+
+  // Proven ROI — value the user actually banked by marking recommendations done.
+  const roi = provenRoi(sessions);
+  if (roi.applied > 0) {
+    const bits = [
+      roi.savedUsd > 0 && green(`~$${roi.savedUsd.toFixed(2)}/run saved`),
+      roi.securityFixed > 0 && cyan(`${roi.securityFixed} security issue(s) fixed`),
+      roi.workflowImproved > 0 && `${roi.workflowImproved} workflow win(s)`,
+    ].filter(Boolean);
+    console.log(
+      "  " + green("✨ AgentTrace ROI: ") + bold(`${roi.applied} recommendation(s) applied`) +
+        (bits.length ? dim(" · ") + bits.join(dim(" · ")) : ""),
+    );
+  }
   console.log(dim(`\n  agenttrace show <id>  to drill into a session\n`));
 }
 
@@ -222,7 +244,8 @@ function showCommand(idPrefix: string): void {
     console.log(bold(`\n  recommendations to improve this agent (${s.recommendations.length})`));
     for (const r of s.recommendations) {
       const tag = r.impact === "high" ? red("high") : r.impact === "medium" ? yellow("med ") : gray("low ");
-      console.log(`    [${tag}] ${bold(r.title)}`);
+      const cat = REC_CATEGORY[r.product] ?? "Workflow";
+      console.log(`    [${tag}] ${bold(r.title)} ${dim("· " + cat)}`);
       console.log(dim(`           ${r.detail}`));
       if (r.action) console.log(cyan(`           → ${r.action}`));
     }

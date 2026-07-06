@@ -1,10 +1,10 @@
 /**
  * Correlate a parsed session with git history to label its OUTCOME.
  *
- * This is the differentiator: no other tool answers "did this agent session's
- * work actually stick?" We attribute commits to a session when they land in the
- * session's repo(s), within (or after) its time window, and touch files the
- * session edited. Then we check whether those commits are still on HEAD.
+ * This is the differentiator: turning a session into a plain-English verdict on
+ * whether its work actually stuck. We attribute commits to a session when they
+ * land in the session's repo(s), within (or after) its time window, and touch
+ * files the session edited. Then we check whether those commits are still on HEAD.
  *
  * When the changed files aren't in a git repo at all (common — many project
  * folders aren't repos), we fall back to a disk-existence check so the outcome

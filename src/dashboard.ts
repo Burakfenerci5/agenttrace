@@ -33,7 +33,16 @@ import {
   setRecState,
   toAgentMarkdown,
   toAgentJson,
+  provenRoi,
 } from "./analysis.ts";
+import {
+  readGroups,
+  addGroup,
+  assignSessions,
+  renameGroup,
+  renameSession,
+  deleteGroup,
+} from "./groups.ts";
 
 /** The client app. Kept inline so the tool is a single install with no assets. */
 function pageHtml(): string {
@@ -146,6 +155,9 @@ function pageHtml(): string {
   h3 { margin:20px 0 8px; font-size:12.5px; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; }
   ul { margin:0; padding-left:18px; }
   .close { float:right; cursor:pointer; color:var(--dim); border:none; background:none; font-size:22px; }
+  .rename-btn { background:none; border:1px solid var(--border); color:var(--dim); border-radius:6px;
+    font-size:11px; padding:2px 8px; cursor:pointer; margin-left:8px; vertical-align:middle; }
+  .rename-btn:hover { border-color:var(--accent); color:var(--accent); }
   .empty { padding:60px 24px; text-align:center; color:var(--dim); }
   .signbox { margin-top:18px; padding:16px; border:1px dashed var(--border); border-radius:12px;
     background:#0d1420; }
@@ -232,6 +244,51 @@ function pageHtml(): string {
   #selbar b { color:var(--text); }
   #selbar .sb-clear { background:none; border:1px solid var(--border); color:var(--dim);
     border-radius:7px; padding:5px 11px; font-size:12px; cursor:pointer; }
+  #selbar .sb-grp-label { color:var(--dim); font-size:12px; margin-left:4px; }
+  #selbar .sb-grp { background:#3fb9501a; border:1px solid #3fb95055; color:#8be29a;
+    border-radius:7px; padding:5px 10px; font-size:12px; cursor:pointer; }
+  #selbar .sb-grp:hover { background:#3fb95030; }
+  #selbar .sb-grp.new { background:none; border-style:dashed; color:var(--dim); }
+
+  /* group badge on a card + product badges on recs */
+  .gbadge { font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:20px;
+    background:#3fb9501a; color:#8be29a; border:1px solid #3fb95040; }
+  .prodbadge { font-size:10px; font-weight:700; padding:1px 7px; border-radius:20px;
+    border:1px solid currentColor; opacity:.95; white-space:nowrap; }
+
+  /* survival hero — the headline number */
+  .tagline { color:var(--dim); font-size:13.5px; margin-left:14px; align-self:center; }
+  .survival { display:flex; align-items:center; gap:28px; background:var(--panel);
+    border:1px solid var(--border); border-radius:16px; padding:22px 26px; margin:6px 0 14px;
+    flex-wrap:wrap; }
+  .survival .ring { position:relative; width:132px; height:132px; flex:0 0 auto; }
+  .survival .ring svg { transform:rotate(-90deg); }
+  .survival .ring .big { position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; }
+  .survival .ring .big .v { font-size:30px; font-weight:800; letter-spacing:-.5px; }
+  .survival .ring .big .k { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.6px; }
+  .survival .bd { flex:1; min-width:260px; }
+  .survival .bd h2 { font-size:15px; margin:0 0 10px; font-weight:700; }
+  .survival .sbar { display:flex; height:16px; border-radius:8px; overflow:hidden; background:var(--panel2); }
+  .survival .sbar i { display:block; height:100%; }
+  .survival .keys { display:flex; gap:16px; margin-top:11px; flex-wrap:wrap; font-size:12.5px; }
+  .survival .keys span { color:var(--dim); }
+  .survival .keys b { color:var(--text); font-variant-numeric:tabular-nums; }
+  .survival .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; vertical-align:baseline; }
+  .survival .note { color:var(--dim); font-size:11.5px; margin-top:10px; }
+
+  /* ROI banner — proven value from accepted recommendations */
+  .roi { display:none; align-items:center; gap:22px; margin:0 0 14px; padding:16px 22px;
+    border-radius:14px; background:linear-gradient(90deg,#3fb95015,#58a6ff10);
+    border:1px solid #3fb95040; flex-wrap:wrap; }
+  .roi.show { display:flex; }
+  .roi .lead { font-size:14px; font-weight:700; color:#8be29a; display:flex; align-items:center; gap:9px; }
+  .roi .lead .spark { font-size:18px; }
+  .roi .metric { display:flex; flex-direction:column; }
+  .roi .metric .v { font-size:22px; font-weight:800; letter-spacing:-.4px; font-variant-numeric:tabular-nums; }
+  .roi .metric .k { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.5px; }
+  .roi .sep { width:1px; align-self:stretch; background:var(--border); }
+  .roi .foot { color:var(--dim); font-size:11px; flex-basis:100%; margin-top:2px; }
 
   /* toast */
   #toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%) translateY(20px);
@@ -256,22 +313,28 @@ function pageHtml(): string {
       </svg>
       <span class="word">AgentTrace</span>
     </span>
+    <span class="tagline">How much of your AI's code actually survived?</span>
   </header>
+  <div class="survival" id="survival"></div>
+  <div class="roi" id="roi"></div>
   <div class="hero" id="hero"></div>
   <div class="recap" id="recap"></div>
   <div class="panel">
     <div class="panel-head">
       <h2 id="chartTitle">Sessions by cost</h2>
+      <div class="seg" id="chartBySeg"></div>
       <div class="seg" id="metricSeg"></div>
     </div>
     <div class="chart" id="chart"></div>
   </div>
   <div class="controls">
+    <select id="scopeSel" title="Narrow the whole dashboard to one group"></select>
     <input id="search" type="search" placeholder="Search title, path, model, branch…" />
     <select id="groupBy">
-      <option value="project" selected>Group by project</option>
-      <option value="none">No grouping</option>
+      <option value="group" selected>Group by group</option>
+      <option value="project">Group by project</option>
       <option value="outcome">Group by outcome</option>
+      <option value="none">No grouping</option>
     </select>
     <select id="sortBy">
       <option value="cost">Most expensive</option>
@@ -301,6 +364,19 @@ const OUTCOME={
   unknown:{text:"Unknown",tone:"neutral",hint:"Not enough information to judge."},
 };
 function od(label){return OUTCOME[label]||OUTCOME.unknown;}
+// Recommendation category → plain, honest feature label. We deliberately show
+// plain labels ("Cost", "Security") in the FREE UX rather than sub-brands: for a
+// free utility, multiple sub-brands read as "paywall coming" and add friction.
+// The internal product keys (tokenkeeper/sessionsentry) are kept in the data
+// model for later paid-tier packaging, but the free dashboard stays one brand.
+const REC_CATEGORY={
+  agenttrace:{name:"Workflow",color:"#58a6ff"},
+  tokenkeeper:{name:"Cost",color:"#3fb950"},
+  sessionsentry:{name:"Security",color:"#f0883e"},
+  actionproof:{name:"Proof",color:"#a371f7"},
+};
+function recCat(p){return REC_CATEGORY[p]||REC_CATEGORY.agenttrace;}
+function prodBadge(p){const x=recCat(p);return '<span class="prodbadge" style="color:'+x.color+'">'+esc(x.name)+'</span>';}
 function relTime(min){ if(min==null)return""; if(min<1)return"just now"; if(min<60)return min+"m ago";
   const h=Math.round(min/60); if(h<24)return h+"h ago"; return Math.round(h/24)+"d ago"; }
 function fmtDur(min){ if(min==null)return"—"; if(min<60)return min+"m"; const h=Math.floor(min/60),m=min%60; return m?h+"h "+m+"m":h+"h"; }
@@ -311,12 +387,66 @@ const METRICS=[
   {k:"tools",label:"Tool calls",get:s=>toolTotal(s.toolCounts),fmt:v=>String(v)},
   {k:"duration",label:"Duration",get:s=>s.durationMin||0,fmt:v=>v+"m"},
 ];
+// How the chart breaks the metric down: one bar per session (default), or bars
+// rolled up by user group / by project (the metric is summed across each).
+const CHART_BY=[
+  {k:"session",label:"By session"},
+  {k:"group",label:"By group"},
+  {k:"project",label:"By project"},
+];
 let SESSIONS=[], AP_AVAILABLE=false;
-const state={q:"",group:"project",sort:"recent",metric:"cost",off:new Set()};
+// state.scope narrows the WHOLE dashboard (survival, ROI, hero, recap, chart,
+// list) to one user group — "show me my Business numbers". "all" = every session.
+// state.chartBy is the chart's own breakdown (session / group / project).
+const state={q:"",group:"group",sort:"recent",metric:"cost",scope:"all",chartBy:"session",off:new Set()};
 // Item 2: multi-select sessions to see combined stats.
 const selected=new Set();
 function toggleSelect(id,ev){ if(ev)ev.stopPropagation(); selected.has(id)?selected.delete(id):selected.add(id); renderList(); renderSelbar(); }
 function clearSelect(){ selected.clear(); renderList(); renderSelbar(); }
+
+// User-defined groups (Personal / Entrepreneurial / Business …), server-persisted.
+let GROUPS={groups:[],assignments:{}};
+function groupOf(s){ return GROUPS.assignments[s.id]||"Ungrouped"; }
+// A session is "in scope" when no group filter is active, or it's in the picked
+// group. Every aggregate (survival, ROI, hero, recap, chart, list) reads through
+// this so the whole dashboard can answer "just my Business sessions".
+function inScope(s){ return state.scope==="all" || groupOf(s)===state.scope; }
+function scoped(){ return SESSIONS.filter(inScope); }
+async function postGroups(msg){
+  const r=await fetch("/api/groups",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(msg)});
+  const j=await r.json(); if(j&&j.ok&&j.store)GROUPS=j.store; return j;
+}
+// Assign the current multi-selection to a group (prompts for/offers a name).
+async function assignSelectedToGroup(name){
+  if(!selected.size)return;
+  const ids=[...selected];
+  await postGroups({op:"assign",sessionIds:ids,group:name});
+  clearSelect();
+  refreshGroupControls(); renderList(); toast(ids.length+" session(s) → "+name);
+}
+async function promptNewGroup(){
+  const name=(window.prompt("New group name (e.g. Personal, Entrepreneurial, Business):")||"").trim();
+  if(name) await assignSelectedToGroup(name);
+}
+// Rename one session — persists a custom title override server-side. Passing an
+// empty string restores the original parsed title. The new title shows up
+// everywhere (cards, chart, detail, CLI) because loadSessions applies it.
+async function renameSessionPrompt(id){
+  const s=SESSIONS.find(x=>x.id===id); if(!s)return;
+  const next=window.prompt("Rename this session (blank restores the original title):",s.title);
+  if(next===null)return; // cancelled
+  const title=next.trim();
+  const j=await postGroups({op:"rename-session",sessionId:id,title});
+  if(!(j&&j.ok)){ toast("Rename failed"+(j&&j.error?": "+j.error:"")+"."); return; }
+  // Re-fetch sessions so the title is authoritative — on a blank input the
+  // server drops the override and loadSessions restores the parsed title,
+  // which we can't reconstruct client-side.
+  const fresh=await fetch("/api/sessions").then(r=>r.json()).catch(()=>null);
+  if(fresh){ SESSIONS=fresh.map(f=>{ const old=SESSIONS.find(x=>x.id===f.id); return old?Object.assign(old,{title:f.title}):f; }); }
+  renderAll();
+  const s2=SESSIONS.find(x=>x.id===id); if(s2)openDetail(s2);
+  toast(title?"Renamed session.":"Restored original title.");
+}
 
 // Recommendation state is SERVER-SIDE (shared with the agent), fetched into this
 // map at load: recStates[sessionId][recId] = {status, by, note, at}. A rec is
@@ -344,6 +474,7 @@ function isVerified(s){return !!s.verified;}
 function metric(){return METRICS.find(m=>m.k===state.metric);}
 
 function passesFilter(s){
+  if(!inScope(s))return false;
   if(state.off.has(s.outcome.label))return false;
   if(!state.q)return true;
   const hay=(s.title+" "+s.cwd+" "+(s.model||"")+" "+(s.gitBranch||"")+" "+s.filesChanged.map(f=>f.path).join(" ")).toLowerCase();
@@ -356,19 +487,102 @@ function sortSessions(arr){
   return arr.slice().sort(by[state.sort]||by.recent);
 }
 
+// Proven ROI: value the user actually banked by clicking "Mark done" on
+// recommendations. Unlike the hero's "potential savings", this counts only
+// COMPLETED recs (status==="done") — proof of what AgentTrace delivered, not
+// what it might. Hidden until there's at least one done rec, so it never shows
+// an empty "$0 saved" boast.
+function renderRoi(){
+  const el=document.getElementById("roi");
+  const done=[];
+  for(const s of scoped()){
+    for(const r of (s.recommendations||[])){
+      if(recStatus(s.id,r.id)==="done") done.push(r);
+    }
+  }
+  if(!done.length){ el.className="roi"; el.innerHTML=""; return; }
+  const saved=done.reduce((a,r)=>a+(r.product==="tokenkeeper"?(r.estSavingsUsd||0):0),0);
+  const security=done.filter(r=>r.product==="sessionsentry").length;
+  const workflow=done.filter(r=>r.product==="agenttrace").length;
+  // Build metric tiles, only for dimensions that have value to show.
+  const tiles=[];
+  if(saved>0) tiles.push({v:"$"+saved.toFixed(saved<100?2:0),k:"saved / comparable run"});
+  if(security>0) tiles.push({v:String(security),k:security===1?"security issue fixed":"security issues fixed"});
+  if(workflow>0) tiles.push({v:String(workflow),k:workflow===1?"workflow improvement":"workflow improvements"});
+  tiles.push({v:String(done.length),k:done.length===1?"recommendation applied":"recommendations applied"});
+  const metricHtml=tiles.map((t,i)=>
+    (i?'<div class="sep"></div>':'')+
+    '<div class="metric"><div class="v">'+t.v+'</div><div class="k">'+t.k+'</div></div>').join("");
+  el.className="roi show";
+  el.innerHTML=
+    '<div class="lead"><span class="spark">✨</span>AgentTrace has already paid off</div>'+
+    metricHtml+
+    '<div class="foot">Proven from recommendations you marked done. Savings are AgentTrace\\'s per-run estimate for each applied fix; security fixes reflect flagged risks you resolved.</div>';
+}
+
+// The headline: of the sessions that actually changed code in a git repo, what
+// share survived (landed & still on HEAD) vs was reverted vs never committed?
+// Untracked / no-edit sessions aren't part of the denominator — you can only
+// measure survival where git can adjudicate it.
+function renderSurvival(){
+  const el=document.getElementById("survival");
+  const scope=scoped();
+  const kept=scope.filter(s=>s.outcome.label==="kept").length;
+  const reverted=scope.filter(s=>s.outcome.label==="reverted").length;
+  const uncommitted=scope.filter(s=>s.outcome.label==="uncommitted").length;
+  const denom=kept+reverted+uncommitted;
+  // A survival % off a tiny sample (e.g. 100% of 2) is misleading, not a hook.
+  // Below the threshold we hide the number and explain what unlocks it, rather
+  // than show a triumphant-but-empty percentage.
+  const MIN_TRACKED=5;
+  if(denom<MIN_TRACKED){
+    const have=denom;
+    el.innerHTML='<div class="bd"><h2>Survival rate — a few more git-tracked sessions to go</h2>'+
+      '<div class="note">Survival rate needs at least '+MIN_TRACKED+' sessions that edited files inside a git repo; you have <b>'+have+'</b> so far'+
+      (have?' ('+kept+' landed, '+reverted+' reverted, '+uncommitted+' uncommitted)':'')+'. '+
+      'Run your agents inside git repositories and AgentTrace will show what share of their work actually survives.</div></div>';
+    return;
+  }
+  const pct=Math.round(100*kept/denom);
+  // Donut ring for the survival %.
+  const R=58, C=2*Math.PI*R, dash=C*kept/denom;
+  const color=pct>=70?"#3fb950":pct>=40?"#d29922":"#f85149";
+  const seg=(cnt,col)=>cnt?'<i style="width:'+(100*cnt/denom)+'%;background:'+col+'"></i>':'';
+  el.innerHTML=
+    '<div class="ring">'+
+      '<svg width="132" height="132" viewBox="0 0 132 132">'+
+        '<circle cx="66" cy="66" r="'+R+'" fill="none" stroke="var(--panel2)" stroke-width="12"/>'+
+        '<circle cx="66" cy="66" r="'+R+'" fill="none" stroke="'+color+'" stroke-width="12" '+
+          'stroke-linecap="round" stroke-dasharray="'+dash+' '+C+'"/>'+
+      '</svg>'+
+      '<div class="big"><div class="v" style="color:'+color+'">'+pct+'%</div><div class="k">survived</div></div>'+
+    '</div>'+
+    '<div class="bd">'+
+      '<h2>'+kept+' of '+denom+' coding sessions landed and stuck</h2>'+
+      '<div class="sbar">'+seg(kept,"#3fb950")+seg(reverted,"#f85149")+seg(uncommitted,"#d29922")+'</div>'+
+      '<div class="keys">'+
+        '<span><span class="dot" style="background:#3fb950"></span><b>'+kept+'</b> landed ('+Math.round(100*kept/denom)+'%)</span>'+
+        '<span><span class="dot" style="background:#f85149"></span><b>'+reverted+'</b> reverted ('+Math.round(100*reverted/denom)+'%)</span>'+
+        '<span><span class="dot" style="background:#d29922"></span><b>'+uncommitted+'</b> uncommitted ('+Math.round(100*uncommitted/denom)+'%)</span>'+
+      '</div>'+
+      '<div class="note">Survival = committed and still on HEAD. Denominator is git-tracked sessions only ('+denom+' of '+scope.length+(state.scope==="all"?" total":" in "+esc(state.scope))+'); untracked & no-edit sessions are excluded.</div>'+
+    '</div>';
+}
+
 function renderHero(){
-  const n=SESSIONS.length;
-  const cost=SESSIONS.reduce((a,s)=>a+(s.usage.estCostUsd||0),0);
-  const tok=SESSIONS.reduce((a,s)=>a+totalTok(s.usage),0);
-  const files=SESSIONS.reduce((a,s)=>a+s.filesChanged.length,0);
-  const kept=SESSIONS.filter(s=>s.outcome.label==="kept").length;
-  const commits=SESSIONS.reduce((a,s)=>a+s.outcome.commits.length,0);
-  const verified=SESSIONS.filter(isVerified).length;
-  const activeN=SESSIONS.filter(s=>s.active).length;
-  const t={};LABELS.forEach(l=>t[l]=SESSIONS.filter(s=>s.outcome.label===l).length);
+  const scope=scoped();
+  const n=scope.length;
+  const cost=scope.reduce((a,s)=>a+(s.usage.estCostUsd||0),0);
+  const tok=scope.reduce((a,s)=>a+totalTok(s.usage),0);
+  const files=scope.reduce((a,s)=>a+s.filesChanged.length,0);
+  const kept=scope.filter(s=>s.outcome.label==="kept").length;
+  const commits=scope.reduce((a,s)=>a+s.outcome.commits.length,0);
+  const verified=scope.filter(isVerified).length;
+  const activeN=scope.filter(s=>s.active).length;
+  const t={};LABELS.forEach(l=>t[l]=scope.filter(s=>s.outcome.label===l).length);
   const segs=LABELS.filter(l=>t[l]).map(l=>'<i style="width:'+(100*t[l]/n)+'%;background:'+LABEL_COLOR[l]+'" title="'+t[l]+' '+od(l).text+'"></i>').join("");
   // Recommendations: total count + potential $ savings, minus any accepted ones.
-  const openRecs=SESSIONS.flatMap(s=>s.recommendations.filter(r=>!isAccepted(s.id,r.id)));
+  const openRecs=scope.flatMap(s=>s.recommendations.filter(r=>!isAccepted(s.id,r.id)));
   const recCount=openRecs.length;
   const recSave=openRecs.reduce((a,r)=>a+(r.estSavingsUsd||0),0);
   // "Sessions traced" carries the landed breakdown as a hover.
@@ -383,18 +597,20 @@ function renderHero(){
 function stat(n,l,sub,hover){return'<div class="stat"'+(hover?' title="'+esc(hover)+'"':'')+'><div class="n">'+n+'</div><div class="l">'+l+'</div>'+(sub||"")+'</div>';}
 
 function renderRecap(){
-  const n=SESSIONS.length;
+  const scope=scoped();
+  const n=scope.length;
   if(!n){document.getElementById("recap").innerHTML="";return;}
-  const t={};LABELS.forEach(l=>t[l]=SESSIONS.filter(s=>s.outcome.label===l).length);
-  const cost=SESSIONS.reduce((a,s)=>a+(s.usage.estCostUsd||0),0);
-  const byProj={};SESSIONS.forEach(s=>{const p=projectOf(s);byProj[p]=(byProj[p]||0)+(s.usage.estCostUsd||0);});
+  const t={};LABELS.forEach(l=>t[l]=scope.filter(s=>s.outcome.label===l).length);
+  const cost=scope.reduce((a,s)=>a+(s.usage.estCostUsd||0),0);
+  const byProj={};scope.forEach(s=>{const p=projectOf(s);byProj[p]=(byProj[p]||0)+(s.usage.estCostUsd||0);});
   const topProj=Object.entries(byProj).sort((a,b)=>b[1]-a[1])[0];
-  const priciest=SESSIONS.slice().sort((a,b)=>(b.usage.estCostUsd||0)-(a.usage.estCostUsd||0))[0];
+  const priciest=scope.slice().sort((a,b)=>(b.usage.estCostUsd||0)-(a.usage.estCostUsd||0))[0];
   const chip=(l)=>t[l]?'<span class="chip badge '+l+'" title="'+esc(od(l).hint)+'">'+t[l]+' '+od(l).text+'</span>':"";
+  const where=state.scope==="all"?"":' <span class="meta">('+esc(state.scope)+' only)</span>';
   document.getElementById("recap").innerHTML=
-    '<h2>What your agents accomplished</h2><p>'+
+    '<h2>What your agents accomplished'+where+'</h2><p>'+
     'Across <b>'+n+' sessions</b> in <b>'+Object.keys(byProj).length+' projects</b>, your agents changed <b>'+
-    SESSIONS.reduce((a,s)=>a+s.filesChanged.length,0)+' files</b> for an estimated <b>$'+cost.toFixed(0)+'</b>. '+
+    scope.reduce((a,s)=>a+s.filesChanged.length,0)+' files</b> for an estimated <b>$'+cost.toFixed(0)+'</b>. '+
     'Outcomes: '+LABELS.map(chip).filter(Boolean).join(" ")+'. '+
     'Your priciest session was <b>'+esc(priciest.title)+'</b> (~'+fmtCost(priciest.usage)+'), and '+
     '<b>'+esc(topProj[0])+'</b> was your most expensive project (~$'+topProj[1].toFixed(0)+').'+
@@ -402,17 +618,75 @@ function renderRecap(){
     '</p>';
 }
 
+// Populate the top-level scope selector: "All groups" + every group that has
+// at least one session, each with its session count. Re-render everything on
+// change so survival/ROI/hero/recap/chart/list all recompute for the pick.
+function renderScopeSel(){
+  const sel=document.getElementById("scopeSel");
+  if(!sel)return;
+  const counts={};
+  SESSIONS.forEach(s=>{const g=groupOf(s);counts[g]=(counts[g]||0)+1;});
+  // Show user-defined groups (in order) that have sessions, then any ad-hoc
+  // group present in assignments, then Ungrouped.
+  const ordered=(GROUPS.groups||[]).filter(g=>counts[g]);
+  Object.keys(counts).forEach(g=>{ if(g!=="Ungrouped"&&!ordered.includes(g))ordered.push(g); });
+  if(counts["Ungrouped"])ordered.push("Ungrouped");
+  // If the current scope no longer has sessions, fall back to "all".
+  if(state.scope!=="all"&&!counts[state.scope])state.scope="all";
+  const opt=(val,label)=>'<option value="'+esc(val)+'"'+(state.scope===val?' selected':'')+'>'+esc(label)+'</option>';
+  sel.innerHTML=opt("all","All groups ("+SESSIONS.length+")")+
+    ordered.map(g=>opt(g,g+" ("+counts[g]+")")).join("");
+}
 function renderMetricSeg(){
   document.getElementById("metricSeg").innerHTML=METRICS.map(m=>
     '<button class="'+(m.k===state.metric?"on":"")+'" data-m="'+m.k+'">'+m.label+'</button>').join("");
   document.querySelectorAll("#metricSeg button").forEach(b=>b.onclick=()=>{state.metric=b.dataset.m;renderChart();renderMetricSeg();});
+  // Chart breakdown: session / group / project.
+  document.getElementById("chartBySeg").innerHTML=CHART_BY.map(c=>
+    '<button class="'+(c.k===state.chartBy?"on":"")+'" data-c="'+c.k+'">'+c.label+'</button>').join("");
+  document.querySelectorAll("#chartBySeg button").forEach(b=>b.onclick=()=>{state.chartBy=b.dataset.c;renderChart();renderMetricSeg();});
 }
 function renderChart(){
   const m=metric();
-  document.getElementById("chartTitle").textContent="Sessions by "+m.label.toLowerCase();
-  const top=sortSessions(SESSIONS.filter(passesFilter)).slice().sort((a,b)=>m.get(b)-m.get(a)).slice(0,20);
+  const shown=sortSessions(SESSIONS.filter(passesFilter));
+  const title=document.getElementById("chartTitle");
+  const chartEl=document.getElementById("chart");
+
+  // --- Rolled-up modes: one bar per group / project, metric summed across it ---
+  if(state.chartBy!=="session"){
+    const keyer=state.chartBy==="group"?groupOf:projectOf;
+    const agg=new Map();
+    shown.forEach(s=>{ const k=keyer(s); agg.set(k,(agg.get(k)||0)+(m.get(s)||0)); });
+    // Honor the user's group order when bucketing by group; else sort by value.
+    let entries=[...agg.entries()];
+    if(state.chartBy==="group"){
+      const order=GROUPS.groups||[];
+      const rank=n=>{ if(n==="Ungrouped")return 1e6; const i=order.indexOf(n); return i<0?1e5:i; };
+      entries.sort((a,b)=>rank(a[0])-rank(b[0]));
+    }else{
+      entries.sort((a,b)=>b[1]-a[1]);
+    }
+    entries=entries.slice(0,20);
+    title.textContent=(state.chartBy==="group"?"Groups by ":"Projects by ")+m.label.toLowerCase();
+    const max=Math.max(1,...entries.map(e=>e[1]));
+    chartEl.innerHTML=entries.map(([name,v])=>{
+      const h=Math.max(2,100*v/max);
+      const isGroup=state.chartBy==="group";
+      const color=isGroup?"#3fb950":"#58a6ff";
+      const click=isGroup?' onclick="scopeTo(\\''+esc(name).replace(/'/g,"\\\\'")+'\\')" style="cursor:pointer"':'';
+      return '<div class="bar" title="'+esc(name)+': '+m.fmt(v)+'"'+click+'>'+
+        '<div class="v">'+m.fmt(v)+'</div>'+
+        '<div class="fill" style="height:'+h+'%;background:linear-gradient(180deg,'+color+',#1f6feb)"></div>'+
+        '<div class="x">'+esc(name)+'</div></div>';
+    }).join("") || '<div class="empty">No sessions match.</div>';
+    return;
+  }
+
+  // --- Default: one bar per session ---
+  title.textContent="Sessions by "+m.label.toLowerCase();
+  const top=shown.slice().sort((a,b)=>m.get(b)-m.get(a)).slice(0,20);
   const max=Math.max(1,...top.map(m.get));
-  document.getElementById("chart").innerHTML=top.map(s=>{
+  chartEl.innerHTML=top.map(s=>{
     const v=m.get(s), h=Math.max(2,100*v/max);
     return '<div class="bar" title="'+esc(s.title)+'" onclick="openDetailById(\\''+s.id+'\\')">'+
       '<div class="v">'+m.fmt(v)+'</div>'+
@@ -420,9 +694,12 @@ function renderChart(){
       '<div class="x">'+esc(projectOf(s))+'</div></div>';
   }).join("") || '<div class="empty">No sessions match.</div>';
 }
+// Clicking a group bar scopes the whole dashboard to that group.
+function scopeTo(name){ state.scope=name; renderAll(); }
 
 function renderFilters(){
-  const t={};LABELS.forEach(l=>t[l]=SESSIONS.filter(s=>s.outcome.label===l).length);
+  const scope=scoped();
+  const t={};LABELS.forEach(l=>t[l]=scope.filter(s=>s.outcome.label===l).length);
   document.getElementById("filters").innerHTML=LABELS.filter(l=>t[l]).map(l=>
     '<span class="chip badge '+l+(state.off.has(l)?' off':'')+'" data-l="'+l+'" title="'+esc(od(l).hint)+'">'+t[l]+' '+od(l).text+'</span>').join("");
   document.querySelectorAll("#filters .chip").forEach(c=>c.onclick=()=>{
@@ -441,12 +718,14 @@ function cardHtml(s){
   const live=s.active?'<span class="live">● active</span>':'';
   const openRecN=(s.recommendations||[]).filter(r=>recStatus(s.id,r.id)==="open").length;
   const recs=openRecN?'<span class="recpill">💡 '+openRecN+'</span>':'';
+  const gname=GROUPS.assignments[s.id];
+  const gbadge=gname?'<span class="gbadge" title="Group">'+esc(gname)+'</span>':'';
   const sel=selected.has(s.id);
   return '<div class="card'+(sel?' selected':'')+'" onclick="openDetailById(\\''+s.id+'\\')">'+
     '<div class="top">'+
       '<input type="checkbox" class="sel" '+(sel?'checked':'')+' onclick="toggleSelect(\\''+s.id+'\\',event)" title="Select to compare">'+
       '<span class="badge '+s.outcome.label+'" title="'+esc(od(s.outcome.label).hint)+'">'+od(s.outcome.label).text+'</span>'+
-      '<span class="title">'+esc(s.title)+'</span>'+live+verified+recs+
+      '<span class="title">'+esc(s.title)+'</span>'+gbadge+live+verified+recs+
       '<span class="meta">'+relTime(s.idleMin)+'</span></div>'+
     '<div class="meta">'+
       '⏱ '+fmtDate(s.startedAt)+' → '+fmtDate(s.endedAt)+' ('+fmtDur(s.durationMin)+') · '+
@@ -468,10 +747,18 @@ function renderList(){
   document.getElementById("spend").innerHTML='showing <b>'+shown.length+'</b> · est. spend <b>$'+spend.toFixed(2)+'</b>';
   if(!shown.length){list.innerHTML='<div class="empty">No sessions match the current filters.</div>';return;}
   if(state.group==="none"){list.innerHTML=shown.map(cardHtml).join("");return;}
-  const keyer=state.group==="project"?projectOf:(s=>s.outcome.label);
+  const keyer=state.group==="project"?projectOf:state.group==="group"?groupOf:(s=>s.outcome.label);
   const groups=new Map();
   shown.forEach(s=>{const k=keyer(s);(groups.get(k)||groups.set(k,[]).get(k)).push(s);});
-  list.innerHTML=[...groups.entries()].map(([name,items])=>groupHead(name,items)+items.map(cardHtml).join("")).join("");
+  // When grouping by user groups, honor the user's defined order, then any
+  // ad-hoc groups, then "Ungrouped" last. Otherwise keep insertion order.
+  let entries=[...groups.entries()];
+  if(state.group==="group"){
+    const order=GROUPS.groups||[];
+    const rank=n=>{ if(n==="Ungrouped")return 1e6; const i=order.indexOf(n); return i<0?1e5:i; };
+    entries.sort((a,b)=>rank(a[0])-rank(b[0]));
+  }
+  list.innerHTML=entries.map(([name,items])=>groupHead(name,items)+items.map(cardHtml).join("")).join("");
 }
 
 // Item 2: floating bar summarizing the combined stats of selected sessions.
@@ -487,6 +774,9 @@ function renderSelbar(){
   const dur=sel.reduce((a,s)=>a+(s.durationMin||0),0);
   const projects=new Set(sel.map(projectOf)).size;
   bar.className="show";
+  // Buttons to file the selection under an existing group, a new one, or clear it.
+  const groupBtns=(GROUPS.groups||[]).map(g=>
+    '<button class="sb-grp" onclick="assignSelectedToGroup(\\''+g.replace(/'/g,"\\\\'")+'\\')">'+esc(g)+'</button>').join("");
   bar.innerHTML=
     '<b>'+sel.size+' selected</b>'+(projects>1?' · '+projects+' projects':'')+
     '<span class="sb">~$'+cost.toFixed(2)+'</span>'+
@@ -494,13 +784,19 @@ function renderSelbar(){
     '<span class="sb">'+files+' files</span>'+
     '<span class="sb">'+acts+' actions</span>'+
     '<span class="sb">'+fmtDur(dur)+' total</span>'+
+    '<span class="sb-grp-label">group into:</span>'+groupBtns+
+    '<button class="sb-grp new" onclick="promptNewGroup()">+ new</button>'+
+    '<button class="sb-grp" onclick="assignSelectedToGroup(null)" title="Remove from any group">ungroup</button>'+
     '<button class="sb-clear" onclick="clearSelect()">clear</button>';
 }
+// Re-sync scope-dependent controls after group assignments change: the scope
+// dropdown gains/loses groups, and every aggregate may shift.
+function refreshGroupControls(){ renderScopeSel(); renderSurvival(); renderRoi(); renderHero(); renderRecap(); renderChart(); renderFilters(); }
 
 function openDetailById(id){ const s=SESSIONS.find(x=>x.id===id); if(s) openDetail(s); }
 
 function recHtml(s,r){
-  const icon={skill:"🧩",cost:"💰",workflow:"🔀",quality:"✅"}[r.kind]||"💡";
+  const icon={skill:"🧩",cost:"💰",workflow:"🔀",quality:"✅",security:"🛡️"}[r.kind]||"💡";
   const st=recStates[s.id]&&recStates[s.id][r.id];
   const status=st?st.status:"open";
   const save=r.estSavingsUsd>0?'<span class="rec-save">~$'+r.estSavingsUsd.toFixed(2)+'/run</span>':'';
@@ -515,7 +811,7 @@ function recHtml(s,r){
   }
   const cwd=esc(s.cwd||"");
   return '<div class="rec '+r.impact+'" id="rec-'+r.id+'">'+
-    '<div class="rec-t">'+icon+' '+esc(r.title)+save+'<span class="rec-imp">'+r.impact+'</span></div>'+
+    '<div class="rec-t">'+icon+' '+esc(r.title)+' '+prodBadge(r.product)+save+'<span class="rec-imp">'+r.impact+'</span></div>'+
     '<div class="meta">'+esc(r.detail)+'</div>'+
     '<div class="rec-prompt-wrap"><div class="rec-plabel">Prompt for your next session</div>'+
       '<pre class="rec-prompt" id="pr-'+r.id+'">'+esc(r.prompt)+'</pre></div>'+
@@ -593,7 +889,8 @@ function openDetail(s){
         : '<b>ActionProof not installed</b><div class="meta">Clone ActionProof next to agenttrace (or set ACTIONPROOF_DIR) to sign actions into verifiable receipts.</div>');
   d.innerHTML=
     '<div class="dhead"><button class="close" onclick="detail.close()">×</button>'+
-      '<div class="title" style="font-size:16px">'+esc(s.title)+'</div>'+
+      '<div class="title" style="font-size:16px">'+esc(s.title)+
+        ' <button class="rename-btn" title="Rename this session" onclick="renameSessionPrompt(\\''+s.id+'\\')">✎ rename</button></div>'+
       '<div class="meta">'+esc(s.id)+'</div></div>'+
     '<div class="dbody">'+
       '<div class="kv">'+
@@ -700,11 +997,16 @@ async function acceptAndBank(sid,rid){
   await setRecState(sid,rid,"done");
   const s=SESSIONS.find(x=>x.id===sid);
   const r=s&&s.recommendations.find(x=>x.id===rid);
-  renderHero(); renderList(); if(s) openDetail(s);
-  if(r&&r.estSavingsUsd>0) toast("Nice — banked ~$"+r.estSavingsUsd.toFixed(2)+" of savings per comparable session.");
+  renderRoi(); renderHero(); renderList(); if(s) openDetail(s);
+  // Confirm the proven value banked, tailored to what kind of win it was.
+  if(r){
+    if(r.product==="tokenkeeper"&&r.estSavingsUsd>0) toast("Banked ~$"+r.estSavingsUsd.toFixed(2)+"/run — AgentTrace ROI updated.");
+    else if(r.product==="sessionsentry") toast("Security issue resolved — AgentTrace ROI updated.");
+    else toast("Improvement applied — AgentTrace ROI updated.");
+  }
 }
-async function skipRec(sid,rid){ await setRecState(sid,rid,"skipped"); const s=SESSIONS.find(x=>x.id===sid); renderHero(); renderList(); if(s) openDetail(s); }
-async function undoRec(sid,rid){ await setRecState(sid,rid,"open"); const s=SESSIONS.find(x=>x.id===sid); renderHero(); renderList(); if(s) openDetail(s); }
+async function skipRec(sid,rid){ await setRecState(sid,rid,"skipped"); const s=SESSIONS.find(x=>x.id===sid); renderRoi(); renderHero(); renderList(); if(s) openDetail(s); }
+async function undoRec(sid,rid){ await setRecState(sid,rid,"open"); const s=SESSIONS.find(x=>x.id===sid); renderRoi(); renderHero(); renderList(); if(s) openDetail(s); }
 
 function copyAnalysis(sid,btn){
   fetch("/api/analysis?id="+sid+"&format=md").then(r=>r.text()).then(md=>{
@@ -719,10 +1021,18 @@ function toast(msg){
   t.textContent=msg; t.className="show"; clearTimeout(toast._t); toast._t=setTimeout(()=>t.className="",4000);
 }
 
-function boot(data,apAvailable,states){
-  SESSIONS=data; AP_AVAILABLE=apAvailable; recStates=states||{};
-  renderHero(); renderRecap(); renderMetricSeg(); renderChart(); renderFilters(); renderList(); renderSelbar();
+// Re-render every scope-sensitive surface (used on load and when the group
+// scope changes). Keeps the aggregates and the list in lockstep.
+function renderAll(){
+  renderScopeSel(); renderSurvival(); renderRoi(); renderHero(); renderRecap();
+  renderMetricSeg(); renderChart(); renderFilters(); renderList(); renderSelbar();
 }
+function boot(data,apAvailable,states,groups){
+  SESSIONS=data; AP_AVAILABLE=apAvailable; recStates=states||{};
+  GROUPS=groups||{groups:[],assignments:{}};
+  renderAll();
+}
+document.getElementById("scopeSel").addEventListener("change",e=>{state.scope=e.target.value;renderAll();});
 document.getElementById("search").addEventListener("input",e=>{state.q=e.target.value;renderChart();renderList();});
 document.getElementById("groupBy").addEventListener("change",e=>{state.group=e.target.value;renderList();});
 document.getElementById("sortBy").addEventListener("change",e=>{state.sort=e.target.value;renderList();});
@@ -731,7 +1041,8 @@ Promise.all([
   fetch("/api/sessions").then(r=>r.json()),
   fetch("/api/status").then(r=>r.json()).catch(()=>({actionproof:false})),
   fetch("/api/recstate").then(r=>r.json()).catch(()=>({})),
-]).then(([sessions,status,states])=>boot(sessions,status.actionproof,states))
+  fetch("/api/groups").then(r=>r.json()).catch(()=>({groups:[],assignments:{}})),
+]).then(([sessions,status,states,groups])=>boot(sessions,status.actionproof,states,groups))
   .catch(e=>{document.getElementById("list").innerHTML='<div class="empty">Failed to load: '+esc(e.message)+'</div>';});
 </script>
 </body>
@@ -852,6 +1163,53 @@ export function serve(port: number, load: () => Session[]): Promise<void> {
       return;
     }
 
+    // --- User-defined session groups (Personal / Entrepreneurial / …) ---
+    if (url.pathname === "/api/groups" && req.method !== "POST") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(readGroups()));
+      return;
+    }
+    if (url.pathname === "/api/groups" && req.method === "POST") {
+      let body = "";
+      for await (const chunk of req) body += chunk;
+      try {
+        const msg = JSON.parse(body);
+        let store;
+        switch (msg.op) {
+          case "assign":
+            // { op:"assign", sessionIds:[...], group:"Business" | null }
+            if (!Array.isArray(msg.sessionIds)) throw new Error("sessionIds must be an array");
+            store = assignSessions(msg.sessionIds, msg.group ?? null);
+            break;
+          case "add":
+            if (!msg.name) throw new Error("need name");
+            store = addGroup(String(msg.name));
+            break;
+          case "rename":
+            if (!msg.from || !msg.to) throw new Error("need from and to");
+            store = renameGroup(String(msg.from), String(msg.to));
+            break;
+          case "rename-session":
+            // { op:"rename-session", sessionId, title }  (blank title clears it)
+            if (!msg.sessionId) throw new Error("need sessionId");
+            store = renameSession(String(msg.sessionId), String(msg.title ?? ""));
+            break;
+          case "delete":
+            if (!msg.name) throw new Error("need name");
+            store = deleteGroup(String(msg.name));
+            break;
+          default:
+            throw new Error("unknown op (assign|add|rename|rename-session|delete)");
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, store }));
+      } catch (e) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: (e as Error).message }));
+      }
+      return;
+    }
+
     // Agent-readable analysis of one session (Markdown or JSON).
     if (url.pathname === "/api/analysis") {
       const id = url.searchParams.get("id") ?? "";
@@ -929,6 +1287,14 @@ export function serve(port: number, load: () => Session[]): Promise<void> {
       const actionproof = await isActionProofAvailable();
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ actionproof }));
+      return;
+    }
+
+    // Proven ROI aggregate (recommendations marked done). Authoritative,
+    // server-side calc — handy for scripting or tracking ROI over time.
+    if (url.pathname === "/api/roi") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(provenRoi(load())));
       return;
     }
 

@@ -56,6 +56,7 @@ export function recommend(session: Session): Recommendation[] {
       const est = Math.min(2, n * 0.15) * outCostPerTok(session.model) * (session.usage.outputTokens / Math.max(1, totalTools)) * n;
       push({
         kind: "skill",
+        product: "agenttrace",
         title: `Add a "${s.name}" skill`,
         detail: `The agent used raw Bash for ${s.label} ${n} times. A saved skill makes this one reliable step and stops the agent re-deriving the approach each time.`,
         action: `Create a .claude/skills/${s.name}/ skill capturing your approach to ${s.label}.`,
@@ -75,6 +76,7 @@ export function recommend(session: Session): Recommendation[] {
     const est = 0.5 * cacheRead * cacheReadCostPerTok(session.model);
     push({
       kind: "cost",
+      product: "tokenkeeper",
       title: "Trim context to cut cache-read spend",
       detail: `This session re-read ${(cacheRead / 1e6).toFixed(0)}M cached tokens — the dominant cost driver. Long-lived context is re-sent every turn.`,
       action: "Use /compact or start fresh sessions for unrelated tasks; narrow what's brought into context.",
@@ -88,6 +90,7 @@ export function recommend(session: Session): Recommendation[] {
   if ((session.durationMin ?? 0) > 600 && session.userMessages > 40) {
     push({
       kind: "workflow",
+      product: "tokenkeeper",
       title: "Split marathon sessions",
       detail: `This session ran ${Math.round((session.durationMin ?? 0) / 60)}h with ${session.userMessages} of your messages. Very long sessions accumulate context and cost.`,
       action: "Break distinct goals into separate sessions so each stays focused and cheap.",
@@ -101,6 +104,7 @@ export function recommend(session: Session): Recommendation[] {
   if (session.filesChanged.length >= 5 && session.outcome.label === "uncommitted") {
     push({
       kind: "quality",
+      product: "agenttrace",
       title: "Commit or discard this work",
       detail: `${session.filesChanged.length} files were edited in a git repo but nothing was committed. Work like this is easy to lose.`,
       action: "Review the diff and commit intentionally, or revert if it was exploratory.",
@@ -114,6 +118,7 @@ export function recommend(session: Session): Recommendation[] {
   if (totalTools > 60 && !tools["TodoWrite"] && !tools["ExitPlanMode"]) {
     push({
       kind: "quality",
+      product: "agenttrace",
       title: "Plan big tasks up front",
       detail: `${totalTools} tool calls with no planning step. Long tasks tend to drift without an explicit plan or todo list.`,
       action: "Ask the agent to draft a plan (plan mode) or track a todo list before large changes.",
@@ -129,6 +134,7 @@ export function recommend(session: Session): Recommendation[] {
     const est = 0.3 * reads * 2000 * cacheReadCostPerTok(session.model); // rough: avoided re-context
     push({
       kind: "cost",
+      product: "tokenkeeper",
       title: "Add a CLAUDE.md map or navigation skill",
       detail: `${reads} read/search calls (${Math.round((100 * reads) / totalTools)}% of activity) — the agent spent heavy effort just locating things.`,
       action: "Add a CLAUDE.md that maps the codebase, or a skill pointing to key files, to cut exploratory reads.",
@@ -138,6 +144,73 @@ export function recommend(session: Session): Recommendation[] {
     });
   }
 
+  // --- SessionSentry: session-security recommendations. ---
+  securityRecs(session, push);
+
   const rank = { high: 0, medium: 1, low: 2 };
   return recs.sort((a, b) => rank[a.impact] - rank[b.impact]);
+}
+
+/** Secrets/credentials worth flagging when they appear in shell commands. */
+const SECRET_PATTERNS: { rx: RegExp; what: string }[] = [
+  { rx: /\b(AKIA|ASIA)[0-9A-Z]{16}\b/, what: "an AWS access key id" },
+  { rx: /\b(sk|rk)-[A-Za-z0-9]{20,}\b/, what: "an API secret key" },
+  { rx: /\bgh[pousr]_[A-Za-z0-9]{20,}\b/, what: "a GitHub token" },
+  { rx: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/, what: "a Slack token" },
+  { rx: /-----BEGIN [A-Z ]*PRIVATE KEY-----/, what: "a private key" },
+  { rx: /\b(export\s+)?[A-Z_]*(SECRET|TOKEN|PASSWORD|API_?KEY)[A-Z_]*\s*=\s*['"]?[^\s'"]{6,}/, what: "an inline secret in an env var" },
+];
+
+/**
+ * SessionSentry heuristics — the session-security mini product. Two angles:
+ *  1) High-consequence actions (push/deploy/rm -rf/payment) ran without a
+ *     tamper-evident record — recommend verifying them with ActionProof.
+ *  2) A secret/credential appears in plaintext in a shell command — recommend
+ *     moving it to an env var / secret manager and rotating it.
+ */
+function securityRecs(
+  session: Session,
+  push: (r: Omit<Recommendation, "id" | "source">) => void,
+): void {
+  // 1) Unverified critical actions.
+  const criticalUnverified = session.actions.filter((a) => a.critical && !a.verified);
+  if (criticalUnverified.length > 0) {
+    const kinds = [...new Set(criticalUnverified.map((a) => a.type))].join(", ");
+    push({
+      kind: "security",
+      product: "sessionsentry",
+      title: `Verify ${criticalUnverified.length} high-consequence action(s)`,
+      detail:
+        `This session ran ${criticalUnverified.length} state-changing action(s) (${kinds}) with no tamper-evident record. ` +
+        `Risk: if anything went wrong — a bad deploy, an unintended push, a destructive command — there's no signed proof of what actually ran, by which agent, or when.`,
+      action: "Sign these actions with ActionProof so you have an offline-verifiable receipt of each one.",
+      prompt: `Review the high-consequence commands this agent ran (${kinds}). For each, confirm it did what was intended, and going forward: pause and ask me before running anything that pushes code, deploys, deletes data, or moves money.`,
+      impact: criticalUnverified.length >= 3 ? "high" : "medium",
+      estSavingsUsd: 0,
+    });
+  }
+
+  // 2) Secrets in shell commands.
+  const leaks = new Set<string>();
+  for (const a of session.actions) {
+    if (a.tool !== "Bash") continue;
+    const cmd = a.target ?? a.summary;
+    for (const p of SECRET_PATTERNS) {
+      if (p.rx.test(cmd)) leaks.add(p.what);
+    }
+  }
+  if (leaks.size > 0) {
+    push({
+      kind: "security",
+      product: "sessionsentry",
+      title: "Move secrets out of shell commands",
+      detail:
+        `A command in this session appears to contain ${[...leaks].join(", ")} in plaintext. ` +
+        `Secrets typed on the command line land in shell history, transcripts, and process listings.`,
+      action: "Move the secret to an environment variable or a secret manager, and rotate it if it was exposed.",
+      prompt: `A secret appears to have been passed in plaintext on the command line in this project. Help me move it to an environment variable (or a secret manager), update the code/commands to read it from there, add it to .gitignore/.env.example as appropriate, and remind me to rotate the exposed credential.`,
+      impact: "high",
+      estSavingsUsd: 0,
+    });
+  }
 }

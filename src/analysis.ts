@@ -66,6 +66,35 @@ export function setRecState(
   return forSession[recId];
 }
 
+/** Proven ROI: value banked from recommendations the user actually marked done. */
+export interface ProvenRoi {
+  savedUsd: number;
+  securityFixed: number;
+  workflowImproved: number;
+  applied: number;
+}
+
+/**
+ * Aggregate proven ROI across sessions. Counts ONLY recommendations whose
+ * stored status is "done" — proof of delivered value, not potential. Cost is
+ * summed from TokenKeeper recs' per-run savings estimate; security/workflow are
+ * counts of resolved SessionSentry / AgentTrace items.
+ */
+export function provenRoi(sessions: Session[]): ProvenRoi {
+  const roi: ProvenRoi = { savedUsd: 0, securityFixed: 0, workflowImproved: 0, applied: 0 };
+  for (const s of sessions) {
+    const states = statesFor(s.id);
+    for (const r of s.recommendations) {
+      if ((states[r.id]?.status ?? "open") !== "done") continue;
+      roi.applied++;
+      if (r.product === "tokenkeeper") roi.savedUsd += r.estSavingsUsd || 0;
+      else if (r.product === "sessionsentry") roi.securityFixed++;
+      else if (r.product === "agenttrace") roi.workflowImproved++;
+    }
+  }
+  return roi;
+}
+
 /** Merge stored state onto a session's recommendations (adds .state at runtime). */
 export function applyRecState<T extends Session>(session: T): T {
   const states = statesFor(session.id);

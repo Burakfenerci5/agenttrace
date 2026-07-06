@@ -14,7 +14,7 @@ import { join } from "node:path";
 const HOME = mkdtempSync(join(tmpdir(), "agenttrace-home-"));
 process.env.HOME = HOME;
 
-const { setRecState, statesFor, toAgentMarkdown, toAgentJson } = await import(
+const { setRecState, statesFor, toAgentMarkdown, toAgentJson, provenRoi } = await import(
   "../src/analysis.ts"
 );
 import type { Session } from "../src/types.ts";
@@ -39,8 +39,8 @@ function sampleSession(): Session {
     usage: { inputTokens: 100, cacheCreationTokens: 0, cacheReadTokens: 0, outputTokens: 50, estCostUsd: 0.01 },
     outcome: { label: "kept", commits: [{ hash: "deadbeef", subject: "do it", ts: "2026-06-01T10:20:00Z" }], reason: "landed" },
     recommendations: [
-      { id: "abcd1234-0", kind: "skill", title: "Add a git-flow skill", detail: "d", prompt: "make a skill", impact: "high", estSavingsUsd: 2, source: "heuristic" },
-      { id: "abcd1234-1", kind: "cost", title: "Trim context", detail: "d", prompt: "trim", impact: "medium", estSavingsUsd: 1, source: "heuristic" },
+      { id: "abcd1234-0", kind: "skill", product: "agenttrace", title: "Add a git-flow skill", detail: "d", prompt: "make a skill", impact: "high", estSavingsUsd: 2, source: "heuristic" },
+      { id: "abcd1234-1", kind: "cost", product: "tokenkeeper", title: "Trim context", detail: "d", prompt: "trim", impact: "medium", estSavingsUsd: 1, source: "heuristic" },
     ],
   };
 }
@@ -75,6 +75,26 @@ test("toAgentJson exposes recommendation status and critical actions", () => {
   assert.equal(rec0.status, "done");
   const rec1 = j.recommendations.find((r: any) => r.id === "abcd1234-1");
   assert.equal(rec1.status, "open");
+});
+
+test("provenRoi counts only done recs and attributes by product", () => {
+  const s = sampleSession();
+  // rec 0 (agenttrace/workflow) was marked done earlier; mark rec 1 (tokenkeeper) done too.
+  setRecState(s.id, "abcd1234-1", "done", "human", "2026-06-01T12:00:00Z");
+  const roi = provenRoi([s]);
+  assert.equal(roi.applied, 2);
+  assert.equal(roi.workflowImproved, 1); // rec 0
+  assert.equal(roi.savedUsd, 1); // rec 1's estSavingsUsd
+  assert.equal(roi.securityFixed, 0);
+});
+
+test("provenRoi ignores open/skipped recs", () => {
+  const s = sampleSession();
+  setRecState(s.id, "abcd1234-0", "open", "human", "2026-06-01T13:00:00Z");
+  setRecState(s.id, "abcd1234-1", "skipped", "human", "2026-06-01T13:00:00Z");
+  const roi = provenRoi([s]);
+  assert.equal(roi.applied, 0);
+  assert.equal(roi.savedUsd, 0);
 });
 
 test.after(() => rmSync(HOME, { recursive: true, force: true }));

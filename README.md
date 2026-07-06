@@ -1,13 +1,15 @@
 # AgentTrace
 
-**See what your AI coding agents actually did — and whether it stuck.** Every Claude Code
-session, mapped to the files it changed, the commits it produced, the tokens it burned,
-and a plain-English outcome: *did the work land?* Local-first, zero backend, zero telemetry.
+**How much of your AI's code actually survived?** AgentTrace correlates every Claude Code
+session with your git history and gives you one number: the share of your agent's work that
+**landed and stuck** — versus what got **reverted** or **never committed**. Local-first,
+zero backend, zero telemetry.
 
-You run coding agents all day, but you can't see them. Which sessions ran? What did each
-one change? Did that hour of edits get committed, or silently thrown away? How much did it
-cost? AgentTrace reads the session transcripts already on your disk and answers all of
-that — in your terminal or a local dashboard — without sending anything anywhere.
+You run coding agents all day, but you can't see whether their work lasts. That hour of
+edits — did it get committed and survive, or silently thrown away? AgentTrace reads the
+session transcripts already on your disk, matches them to commits, and shows you a
+survival rate — plus what each session changed, what it cost, and how to make the next one
+better. All in your terminal or a local dashboard, without sending anything anywhere.
 
 ## Install
 
@@ -38,8 +40,9 @@ Everything runs against `~/.claude/projects` on your machine. Nothing is uploade
 ## What you get
 
 - **Outcome labeling** — each session is correlated with git and labeled *Landed*,
-  *Reverted*, *Not committed*, *Not in git*, or *No edits*. This is the question no other
-  tool answers: did the agent's work actually survive?
+  *Reverted*, *Not committed*, *Not in git*, or *No edits* — and rolls them into a single
+  **survival rate**. Plenty of tools count your tokens; AgentTrace is the one that tells you,
+  per session, whether the work actually survived.
 - **Cost & tokens** — per-session token usage and a USD estimate from published model
   rates, so you can see where your spend goes.
 - **Recommendations** — local heuristics spot repeated commands (→ add a skill), context

@@ -110,6 +110,26 @@ export interface Usage {
 }
 
 /**
+ * AgentTrace is the hub product; focused capabilities are branded as mini
+ * products that hang off it. Every recommendation is attributed to one, so the
+ * UI can group/badge them and we can later gate a mini product behind a paywall
+ * independently.
+ *   - agenttrace   : workflow / quality / skills (the core "make agents better")
+ *   - tokenkeeper  : token & cost takeout
+ *   - sessionsentry: session security (risky/unverified actions)
+ *   - actionproof  : cryptographic proof/verification (the existing sibling)
+ */
+export type ProductKey = "agenttrace" | "tokenkeeper" | "sessionsentry" | "actionproof";
+
+/** Display metadata for each product (name + accent color for badges). */
+export const PRODUCTS: Record<ProductKey, { name: string; blurb: string; color: string }> = {
+  agenttrace: { name: "AgentTrace", blurb: "Visibility & outcomes", color: "#58a6ff" },
+  tokenkeeper: { name: "TokenKeeper", blurb: "Token & cost takeout", color: "#3fb950" },
+  sessionsentry: { name: "SessionSentry", blurb: "Session security", color: "#f0883e" },
+  actionproof: { name: "ActionProof", blurb: "Cryptographic proof", color: "#a371f7" },
+};
+
+/**
  * A recommendation AgentTrace surfaces to improve a session's future runs —
  * the core "make my agents better" value. Generated locally from heuristics by
  * default; an opt-in deep analysis (Claude API) can add richer ones.
@@ -117,7 +137,9 @@ export interface Usage {
 export interface Recommendation {
   /** Stable id (per session) so acceptance can be tracked. */
   id: string;
-  kind: "skill" | "cost" | "workflow" | "quality";
+  kind: "skill" | "cost" | "workflow" | "quality" | "security";
+  /** Which product this recommendation belongs to (for grouping/badging). */
+  product: ProductKey;
   /** Short imperative title, e.g. "Add a test-runner skill". */
   title: string;
   /** Why this session triggered it. */
