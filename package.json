@@ -30,6 +30,7 @@
     "dev": "node src/cli.ts",
     "start": "node src/cli.ts",
     "build": "node scripts/build.mjs",
+    "metrics": "node scripts/metrics.mjs",
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
