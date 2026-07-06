@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Hardened-runtime entitlements for the AgentTrace app. These are the minimal
+    set Electron/V8 needs to run under the hardened runtime (required for Apple
+    notarization): the JIT and executable-memory allowances let V8 compile
+    JavaScript. We intentionally do NOT request camera, microphone, network
+    server, or file-access-beyond-user entitlements — AgentTrace only reads
+    ~/.claude and ~/.agenttrace and serves a loopback dashboard.
+  -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+</dict>
+</plist>

@@ -6,12 +6,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import {
   isLoopbackHost,
   isLocalRequest,
   shellQuote,
   appleScriptString,
+  readBody,
+  MAX_BODY_BYTES,
+  SECURITY_HEADERS,
+  isLaunchableCwd,
 } from "../src/dashboard.ts";
+
+/** A minimal async-iterable stand-in for an IncomingMessage body. */
+async function* bodyOf(...chunks: (string | Buffer)[]) {
+  for (const c of chunks) yield c as never;
+}
 
 test("isLoopbackHost accepts loopback literals", () => {
   for (const h of [
@@ -95,4 +108,43 @@ test("shellQuote handles a path with spaces", () => {
 test("appleScriptString escapes backslashes and quotes", () => {
   assert.equal(appleScriptString(`say "hi"`), `"say \\"hi\\""`);
   assert.equal(appleScriptString(`a\\b`), `"a\\\\b"`);
+});
+
+test("readBody returns the concatenated body when under the cap", async () => {
+  const body = await readBody(bodyOf('{"a":', "1}"));
+  assert.equal(body, '{"a":1}');
+});
+
+test("readBody rejects a body that exceeds MAX_BODY_BYTES (memory-DoS guard)", async () => {
+  const oversized = "x".repeat(MAX_BODY_BYTES + 1);
+  await assert.rejects(() => readBody(bodyOf(oversized)), /payload too large/);
+});
+
+test("readBody counts bytes across chunks, not just per-chunk", async () => {
+  const half = "x".repeat(Math.ceil(MAX_BODY_BYTES / 2) + 1); // two halves > cap
+  await assert.rejects(() => readBody(bodyOf(half, half)), /payload too large/);
+});
+
+test("SECURITY_HEADERS locks the page down (CSP, nosniff, no framing)", () => {
+  const csp = SECURITY_HEADERS["content-security-policy"];
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /connect-src 'self'/); // no exfiltration to other origins
+  assert.match(csp, /frame-ancestors 'none'/); // clickjacking
+  assert.equal(SECURITY_HEADERS["x-content-type-options"], "nosniff");
+  assert.equal(SECURITY_HEADERS["x-frame-options"], "DENY");
+  assert.equal(SECURITY_HEADERS["referrer-policy"], "no-referrer");
+});
+
+test("isLaunchableCwd accepts a real directory, rejects bogus/relative/NUL paths", () => {
+  const dir = mkdtempSync(join(tmpdir(), "agenttrace-cwd-"));
+  try {
+    assert.equal(isLaunchableCwd(dir), true);
+    assert.equal(isLaunchableCwd(""), false);
+    assert.equal(isLaunchableCwd("relative/path"), false); // must be absolute
+    assert.equal(isLaunchableCwd("/no/such/dir/here-xyz"), false);
+    assert.equal(isLaunchableCwd(join(dir, "\0evil")), false); // NUL byte
+    assert.equal(isLaunchableCwd(join(dir, "not-a-real-file")), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

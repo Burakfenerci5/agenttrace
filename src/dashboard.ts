@@ -16,7 +16,8 @@
  * Local-first and offline: binds to 127.0.0.1, no external assets, no network.
  */
 import { createServer } from "node:http";
-import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { readFileSync, writeFileSync, mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -1103,6 +1104,67 @@ export function appleScriptString(s: string): string {
   return '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
 }
 
+/** Cap on request bodies — every endpoint reads tiny JSON, so 1 MiB is generous. */
+export const MAX_BODY_BYTES = 1_048_576;
+
+/**
+ * Read a request body with a hard byte cap so a hostile/local process can't
+ * exhaust memory by streaming an unbounded payload at our POST endpoints.
+ * Rejects with a "payload too large" error once the cap is exceeded.
+ */
+export async function readBody(req: AsyncIterable<Buffer | string>): Promise<string> {
+  let size = 0;
+  const chunks: string[] = [];
+  for await (const chunk of req) {
+    size += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length;
+    if (size > MAX_BODY_BYTES) throw new Error("payload too large");
+    chunks.push(chunk.toString());
+  }
+  return chunks.join("");
+}
+
+/**
+ * Security headers sent on every response. The UI ships no external assets and
+ * uses no eval, so a strict CSP costs nothing: default-src 'none' blocks any
+ * accidental outbound fetch, connect-src 'self' keeps XHR/fetch on our own
+ * origin (no exfiltration), and frame-ancestors 'none' blocks clickjacking.
+ * 'unsafe-inline' is required only because the single-page app is inline
+ * script + style (there is no bundle to hash), and img/style data: covers the
+ * inline SVG logo and data-URI styles.
+ */
+export const SECURITY_HEADERS: Record<string, string> = {
+  "content-security-policy":
+    "default-src 'none'; " +
+    "script-src 'self' 'unsafe-inline'; " +
+    "style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data:; " +
+    "connect-src 'self'; " +
+    "base-uri 'none'; " +
+    "form-action 'none'; " +
+    "frame-ancestors 'none'",
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "no-referrer",
+  "cross-origin-opener-policy": "same-origin",
+  "cross-origin-resource-policy": "same-origin",
+};
+
+/**
+ * Defense-in-depth validation for /api/launch's cwd. The local-only guard and
+ * shellQuote already prevent remote abuse and shell injection; this additionally
+ * refuses to `cd` anywhere that isn't a real, existing directory, so a bogus
+ * cwd fails fast with a clear error instead of spawning a doomed terminal.
+ */
+export function isLaunchableCwd(cwd: string): boolean {
+  if (!cwd || cwd.includes("\0")) return false;
+  if (!cwd.startsWith("/")) return false; // absolute paths only
+  try {
+    return statSync(cwd).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Start the dashboard server. `load` is injected (the CLI passes a function that
  * discovers+parses+correlates) so the data layer stays testable and decoupled.
@@ -1114,8 +1176,27 @@ export function serve(port: number, load: () => Session[]): Promise<void> {
     return load().map((s) => (verified.has(s.id) ? { ...s, verified: true } : s));
   }
 
-  const server = createServer(async (req, res) => {
+  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    // Fold the security headers into every response from one place: wrap
+    // writeHead so no route can accidentally ship a response without them.
+    const rawWriteHead = res.writeHead.bind(res);
+    res.writeHead = ((status: number, headers?: Record<string, string>) =>
+      rawWriteHead(status, { ...SECURITY_HEADERS, ...(headers ?? {}) })) as typeof res.writeHead;
+
     const url = new URL(req.url ?? "/", "http://localhost");
+
+    // --- Socket-level loopback assertion (defense in depth) ---
+    // We only ever listen on 127.0.0.1, so the peer address must itself be
+    // loopback. This is belt-and-suspenders behind the listen() bind and the
+    // Host/Origin checks below.
+    const peer = req.socket.remoteAddress ?? "";
+    const peerLoopback =
+      peer === "127.0.0.1" || peer === "::1" || peer === "::ffff:127.0.0.1" || peer.startsWith("127.");
+    if (!peerLoopback) {
+      res.writeHead(403, { "content-type": "text/plain" });
+      res.end("forbidden: AgentTrace only accepts local requests");
+      return;
+    }
 
     // --- Local-only guard (DNS-rebinding / CSRF protection) ---
     // We bind to 127.0.0.1, but a malicious web page you visit could still POST
@@ -1144,8 +1225,14 @@ export function serve(port: number, load: () => Session[]): Promise<void> {
       return;
     }
     if (url.pathname === "/api/recstate" && req.method === "POST") {
-      let body = "";
-      for await (const chunk of req) body += chunk;
+      let body: string;
+      try {
+        body = await readBody(req);
+      } catch {
+        res.writeHead(413, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "payload too large" }));
+        return;
+      }
       try {
         const { sessionId, recId, status, by, note } = JSON.parse(body);
         if (!sessionId || !recId || !["open", "done", "skipped"].includes(status)) {
@@ -1170,8 +1257,14 @@ export function serve(port: number, load: () => Session[]): Promise<void> {
       return;
     }
     if (url.pathname === "/api/groups" && req.method === "POST") {
-      let body = "";
-      for await (const chunk of req) body += chunk;
+      let body: string;
+      try {
+        body = await readBody(req);
+      } catch {
+        res.writeHead(413, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "payload too large" }));
+        return;
+      }
       try {
         const msg = JSON.parse(body);
         let store;
@@ -1236,8 +1329,14 @@ export function serve(port: number, load: () => Session[]): Promise<void> {
     // avoid any shell-quoting issues. Falls back to { ok:false } so the client
     // can copy-to-clipboard instead.
     if (url.pathname === "/api/launch" && req.method === "POST") {
-      let body = "";
-      for await (const chunk of req) body += chunk;
+      let body: string;
+      try {
+        body = await readBody(req);
+      } catch {
+        res.writeHead(413, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "payload too large" }));
+        return;
+      }
       let cwd = "";
       let prompt = "";
       try {
@@ -1250,6 +1349,14 @@ export function serve(port: number, load: () => Session[]): Promise<void> {
       if (!cwd || !prompt) {
         res.writeHead(400, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: "need cwd and prompt" }));
+        return;
+      }
+      // Defense in depth: only ever `cd` into a real, existing directory. This
+      // is behind the local-only guard + shellQuote, but refuses a bogus/hostile
+      // cwd fast instead of spawning a terminal that would just error out.
+      if (!isLaunchableCwd(cwd)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "cwd is not an existing directory" }));
         return;
       }
       try {
@@ -1299,8 +1406,14 @@ export function serve(port: number, load: () => Session[]): Promise<void> {
     }
 
     if (url.pathname === "/api/sign" && req.method === "POST") {
-      let body = "";
-      for await (const chunk of req) body += chunk;
+      let body: string;
+      try {
+        body = await readBody(req);
+      } catch {
+        res.writeHead(413, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "payload too large" }));
+        return;
+      }
       let id = "";
       let seq: number | undefined;
       try {

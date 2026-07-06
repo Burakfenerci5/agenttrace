@@ -11,9 +11,36 @@
  */
 const { app, BrowserWindow, shell, dialog } = require("electron");
 const { createServer } = require("node:net");
+const { URL } = require("node:url");
 
 // Bundled core: exposes serve(port, loadSessions) and loadSessions().
 const core = require("./core.cjs");
+
+// The one origin this app is ever allowed to load. Set once the server binds.
+let APP_ORIGIN = null;
+
+/** True only for our own loopback dashboard origin. */
+function isOwnOrigin(rawUrl) {
+  if (!APP_ORIGIN) return false;
+  try {
+    return new URL(rawUrl).origin === APP_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+/** Open a URL in the user's real browser — only http(s)/mailto, nothing else. */
+function openExternalSafely(rawUrl) {
+  let scheme = "";
+  try {
+    scheme = new URL(rawUrl).protocol;
+  } catch {
+    return; // unparseable → ignore
+  }
+  if (scheme === "http:" || scheme === "https:" || scheme === "mailto:") {
+    shell.openExternal(rawUrl);
+  }
+}
 
 /** Ask the OS for a free loopback port so we never collide with a dev server. */
 function freePort() {
@@ -26,6 +53,27 @@ function freePort() {
     });
   });
 }
+
+// Harden every web-contents the app ever creates (defense in depth, applies to
+// the main window and any child): keep the renderer pinned to our own origin
+// and route every external link through the OS browser, never a new Electron
+// window loading remote content.
+app.on("web-contents-created", (_event, contents) => {
+  contents.setWindowOpenHandler(({ url }) => {
+    if (isOwnOrigin(url)) return { action: "allow" };
+    openExternalSafely(url);
+    return { action: "deny" };
+  });
+  // Block in-window navigation to anything that isn't our dashboard origin.
+  contents.on("will-navigate", (event, url) => {
+    if (!isOwnOrigin(url)) {
+      event.preventDefault();
+      openExternalSafely(url);
+    }
+  });
+  // Never attach a webview.
+  contents.on("will-attach-webview", (event) => event.preventDefault());
+});
 
 async function createWindow() {
   const win = new BrowserWindow({
@@ -42,17 +90,15 @@ async function createWindow() {
       // no Node integration in the renderer. Defense in depth.
       contextIsolation: true,
       nodeIntegration: false,
+      nodeIntegrationInWorker: false,
+      // Run the renderer in the OS sandbox and keep web security on. The UI is
+      // pure HTML/CSS/JS served from our own origin, so nothing here needs to
+      // be relaxed.
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      experimentalFeatures: false,
     },
-  });
-
-  // Open external links (docs, GitHub, ActionProof) in the real browser, not
-  // inside the app window.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
-      return { action: "allow" };
-    }
-    shell.openExternal(url);
-    return { action: "deny" };
   });
 
   win.once("ready-to-show", () => win.show());
@@ -60,7 +106,8 @@ async function createWindow() {
   try {
     const port = await freePort();
     await core.serve(port, core.loadSessions);
-    await win.loadURL(`http://127.0.0.1:${port}/`);
+    APP_ORIGIN = `http://127.0.0.1:${port}`;
+    await win.loadURL(`${APP_ORIGIN}/`);
   } catch (err) {
     dialog.showErrorBox(
       "AgentTrace failed to start",
@@ -70,14 +117,28 @@ async function createWindow() {
   }
 }
 
-app.whenReady().then(createWindow);
-
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
-});
-
-app.on("window-all-closed", () => {
-  // Standard Mac behavior is to stay in the dock, but AgentTrace is a
-  // single-window utility — quitting on close is the least surprising.
+// Single-instance lock: a second launch just focuses the existing window
+// instead of spinning up a second server on a second port.
+if (!app.requestSingleInstanceLock()) {
   app.quit();
-});
+} else {
+  app.on("second-instance", () => {
+    const [win] = BrowserWindow.getAllWindows();
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
+  });
+
+  app.whenReady().then(createWindow);
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+
+  app.on("window-all-closed", () => {
+    // Standard Mac behavior is to stay in the dock, but AgentTrace is a
+    // single-window utility — quitting on close is the least surprising.
+    app.quit();
+  });
+}
